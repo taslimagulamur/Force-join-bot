@@ -1,157 +1,197 @@
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup
 import os
-import asyncio
-from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, InputMediaPhoto
-from motor.motor_asyncio import AsyncIOMotorClient
-from flask import Flask
-from threading import Thread
+import json
 
-# --- RENDER PORT BINDING & KEEP ALIVE ---
-app = Flask('')
+# ================= CONFIG =================
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Render / VPS Environment variable
+ADMINS = [8231476408]  # আপনার Telegram ID
+DATA_FILE = "data.json"
 
-@app.route('/')
-def home():
-    return "Bot is Running 24/7! 🔥"
+# Welcome Media
+WELCOME_PHOTO_URL = "https://i.ibb.co/your-image.jpg"  # Replace with your Photo/GIF/Video
+WELCOME_SOUND_URL = "https://www.example.com/welcome.mp3"  # Optional welcome sound
 
-def run():
-    # Render takes port from environment or defaults to 8080
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+# Admin Message for verified users
+ADMIN_VERIFIED_MSG = "🎉✅ আপনি সব চ্যানেল join করেছেন। এখন বট ব্যবহার করতে পারবেন! ❤️"
 
-def keep_alive():
-    t = Thread(target=run)
-    t.daemon = True
-    t.start()
+# Inline Buttons for welcome (Multiple links)
+WELCOME_BUTTONS = [
+    {"text": "📢 Join Our Channel", "url": "https://t.me/YourChannel"},
+    {"text": "🌐 Visit Website", "url": "https://example.com"},
+    {"text": "📜 Rules", "url": "https://t.me/YourRulesChannel"}
+]
+# =========================================
 
-# --- CONFIGURATION (Apnar deya Details) ---
-API_ID = 33970225
-API_HASH = "1ccfef47fd720a822c6c7978ba1902f5"
-BOT_TOKEN = "8589887674:AAGZLYVrvpsv8PiH3MMpmApFlUI3YzPtBF4"
-ADMIN_ID = 8231476408
-MONGO_URL = os.environ.get("MONGO_URL")
+bot = telebot.TeleBot(BOT_TOKEN)
 
-# --- BOT & DB SETUP ---
-bot = Client("HotPremiumBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-db_client = AsyncIOMotorClient(MONGO_URL)
-db = db_client["HotPhotoBot"]
-folders_col = db["folders"]
-config_col = db["config"]
+# ---------- Data Load / Save ----------
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        return {
+            "channels": [],  # Force join channels (Private/Public)
+            "force": True,
+            "users": []
+        }
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
 
-# --- UTILS (Force Join Check) ---
-async def is_subscribed(user_id):
-    data = await config_col.find_one({"id": "force_join"})
-    channels = data["channels"] if data else []
-    if not channels: return True
-    for ch in channels:
+def save_data(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+data = load_data()
+
+# ---------- Helpers ----------
+def is_admin(uid):
+    return uid in ADMINS
+
+def check_join(uid):
+    """Check if user joined all channels"""
+    if not data["force"]:
+        return True
+    for ch in data["channels"]:
         try:
-            member = await bot.get_chat_member(ch, user_id)
-            if member.status in [enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.BANNED]:
+            member = bot.get_chat_member(ch, uid)
+            if member.status not in ["member", "administrator", "creator"]:
                 return False
-        except Exception:
+        except:
             return False
     return True
 
-# --- USER INTERFACE (Hot Bangla Style) ---
-@bot.on_message(filters.command("start"))
-async def start(client, message):
-    user = message.from_user
-    subscribed = await is_subscribed(user.id)
-    
-    if not subscribed:
-        data = await config_col.find_one({"id": "force_join"})
-        channels = data["channels"] if data else []
-        btns = [[InlineKeyboardButton("📢 Join Now 🔞", url=f"https://t.me/{ch.replace('@','')}")] for ch in channels]
-        btns.append([InlineKeyboardButton("✅ Verify & Start 💋", callback_data="verify")])
-        
-        return await message.reply_text(
-            f"👋 **Hey Shona {user.mention}!!** 💋\n\n"
-            "🔞 **Secret Gallery**-te dhukte niche deya channel join koro shona!", 
-            reply_markup=InlineKeyboardMarkup(btns)
-        )
+# ---------- Welcome / Start ----------
+@bot.message_handler(commands=["start"])
+def start(message):
+    uid = message.from_user.id
+    chat_id = message.chat.id
 
-    folders = await folders_col.find().to_list(100)
-    if not folders:
-        return await message.reply_text(f"🔥 **Hey {user.first_name}!**\n\n😔 *Admin ekhono kono folder upload koreni!*")
-    
-    btn = [[InlineKeyboardButton(f"📁 {f['name']} (Click koro) 🔥", callback_data=f"open_{f['name']}_0")] for f in folders]
-    await message.reply_text(
-        f"🌟 **Hello Jan {user.first_name}!** 🌟\n\n"
-        "📸 **Nicher folder theke gorom collection browse koro:** 👇",
-        reply_markup=InlineKeyboardMarkup(btn)
-    )
+    # Save user
+    if uid not in data["users"]:
+        data["users"].append(uid)
+        save_data(data)
 
-@bot.on_callback_query(filters.regex("verify"))
-async def verify_cb(client, cb: CallbackQuery):
-    if await is_subscribed(cb.from_user.id):
-        await cb.answer("✅ Verified Success! Enjoy koro shona. 💋", show_alert=True)
-        await start(client, cb.message)
-        await cb.message.delete()
+    # Inline buttons setup
+    markup = InlineKeyboardMarkup(row_width=1)  # 1 button per row
+    for btn in WELCOME_BUTTONS:
+        markup.add(InlineKeyboardButton(btn["text"], url=btn["url"]))
+    
+    # Force Join Check
+    if check_join(uid):
+        # Send Admin verified message (Photo + Text + Buttons)
+        bot.send_message(chat_id, ADMIN_VERIFIED_MSG, reply_markup=markup)
     else:
-        await cb.answer("❌ Uff! Age join koro tarpore verify click koro! 🔞", show_alert=True)
-
-# --- PHOTO VIEWER (NEXT/PREV) ---
-@bot.on_callback_query(filters.regex(r"^open_(.*)_(.*)"))
-async def view_photos(client, cb: CallbackQuery):
-    _, f_name, idx = cb.data.split("_")
-    idx = int(idx)
-    folder = await folders_col.find_one({"name": f_name})
-    photos = folder["photos"]
-    total = len(photos)
-    
-    btns = []
-    nav = []
-    if idx > 0: nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"open_{f_name}_{idx-1}"))
-    if idx < total - 1: nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"open_{f_name}_{idx+1}"))
-    
-    if nav: btns.append(nav)
-    btns.append([InlineKeyboardButton("🏠 Main Menu 🔥", callback_data="home")])
-    
-    try:
-        await cb.message.edit_media(
-            media=InputMediaPhoto(photos[idx], caption=f"📁 **Folder:** {f_name}\n🖼 **Photo:** {idx+1}/{total}"), 
-            reply_markup=InlineKeyboardMarkup(btns)
+        # Fancy Bangla Welcome Text
+        welcome_text = (
+            "💖✨ স্বাগতম প্রিয় বন্ধু! ✨💖\n\n"
+            "🌟 আমি তোমাকে আমাদের প্রিমিয়াম বটের জগতে স্বাগত জানাচ্ছি! 🌟\n"
+            "🥰 Force Join সব চ্যানেল করতে হবে, তারপর বট ব্যবহার করতে পারবেন! 😎🎉\n\n"
+            "✅ নিচের বাটন ক্লিক করে চ্যানেল Join & Verify করুন 🚀"
         )
-    except:
-        await cb.message.reply_photo(
-            photo=photos[idx],
-            caption=f"📁 **Folder:** {f_name}\n🖼 **Photo:** {idx+1}/{total}",
-            reply_markup=InlineKeyboardMarkup(btns)
-        )
-        await cb.message.delete()
+        # Send Photo / GIF
+        bot.send_photo(chat_id, WELCOME_PHOTO_URL, caption=welcome_text, reply_markup=markup)
+        # Optional Welcome Sound
+        # bot.send_audio(chat_id, WELCOME_SOUND_URL)
 
-@bot.on_callback_query(filters.regex("home"))
-async def home_cb(client, cb: CallbackQuery):
-    await start(client, cb.message)
-    await cb.message.delete()
+# ---------- Admin Panel ----------
+@bot.message_handler(commands=["admin"])
+def admin_panel(message):
+    if not is_admin(message.from_user.id):
+        return
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row("➕ Add Channel", "➖ Remove Channel")
+    kb.row("✅ Force ON", "❌ Force OFF")
+    kb.row("📣 Broadcast", "👥 Total Users")
+    kb.row("📄 Channel List", "✏️ Set Admin Verified Message")
+    bot.send_message(message.chat.id, "👑 Admin Panel Opened", reply_markup=kb)
 
-# --- ADMIN PANEL ---
-@bot.on_message(filters.command("add_folder") & filters.user(ADMIN_ID))
-async def add_folder(c, m):
-    try:
-        name = m.text.split(" ", 1)[1]
-        await folders_col.insert_one({"name": name, "photos": []})
-        await m.reply(f"✅ Folder '**{name}**' ready! 🔞")
-    except: await m.reply("Usage: `/add_folder Name`")
+# ---------- Admin Buttons ----------
+@bot.message_handler(func=lambda m: m.text == "➕ Add Channel")
+def add_channel(message):
+    if not is_admin(message.from_user.id):
+        return
+    msg = bot.send_message(message.chat.id, "Channel username / ID দিন (@ সহ বা -1001234567890 for private):")
+    bot.register_next_step_handler(msg, save_channel)
 
-@bot.on_message(filters.command("add_photos") & filters.user(ADMIN_ID))
-async def add_photos(c, m):
-    try:
-        parts = m.text.split()
-        f_name = parts[1]
-        links = parts[2:]
-        await folders_col.update_one({"name": f_name}, {"$push": {"photos": {"$each": links}}})
-        await m.reply(f"✅ Photo add hoyeche! 🔥")
-    except: await m.reply("Usage: `/add_photos FolderName Link1 Link2`")
+def save_channel(message):
+    ch = message.text.strip()
+    if ch not in data["channels"]:
+        data["channels"].append(ch)
+        save_data(data)
+        bot.send_message(message.chat.id, f"✅ Added: {ch}")
 
-@bot.on_message(filters.command("add_force") & filters.user(ADMIN_ID))
-async def add_force(c, m):
-    try:
-        ch = m.text.split(" ", 1)[1]
-        await config_col.update_one({"id": "force_join"}, {"$addToSet": {"channels": ch}}, upsert=True)
-        await m.reply(f"✅ Channel {ch} Force Join-e add hoyeche! 🛡️")
-    except: await m.reply("Usage: `/add_force @channel`")
+@bot.message_handler(func=lambda m: m.text == "➖ Remove Channel")
+def remove_channel(message):
+    if not is_admin(message.from_user.id):
+        return
+    msg = bot.send_message(message.chat.id, "Remove করতে channel username / ID দিন:")
+    bot.register_next_step_handler(msg, del_channel)
 
-if __name__ == "__main__":
-    keep_alive()
-    print("Bot is Starting... Hot Mode On! 🔥")
-    bot.run()
+def del_channel(message):
+    ch = message.text.strip()
+    if ch in data["channels"]:
+        data["channels"].remove(ch)
+        save_data(data)
+        bot.send_message(message.chat.id, f"❌ Removed: {ch}")
+
+@bot.message_handler(func=lambda m: m.text == "✅ Force ON")
+def force_on(message):
+    if not is_admin(message.from_user.id):
+        return
+    data["force"] = True
+    save_data(data)
+    bot.send_message(message.chat.id, "✅ Force Join ENABLED")
+
+@bot.message_handler(func=lambda m: m.text == "❌ Force OFF")
+def force_off(message):
+    if not is_admin(message.from_user.id):
+        return
+    data["force"] = False
+    save_data(data)
+    bot.send_message(message.chat.id, "❌ Force Join DISABLED")
+
+@bot.message_handler(func=lambda m: m.text == "👥 Total Users")
+def total_users(message):
+    if not is_admin(message.from_user.id):
+        return
+    bot.send_message(message.chat.id, f"👥 Total Users: {len(data['users'])}")
+
+@bot.message_handler(func=lambda m: m.text == "📄 Channel List")
+def channel_list(message):
+    if not is_admin(message.from_user.id):
+        return
+    if not data["channels"]:
+        bot.send_message(message.chat.id, "No channels added.")
+    else:
+        bot.send_message(message.chat.id, "📄 Channels:\n" + "\n".join(data["channels"]))
+
+@bot.message_handler(func=lambda m: m.text == "✏️ Set Admin Verified Message")
+def set_verified_message(message):
+    if not is_admin(message.from_user.id):
+        return
+    msg = bot.send_message(message.chat.id, "Send new Verified Message (with emojis, text, etc.):")
+    bot.register_next_step_handler(msg, save_verified_message)
+
+def save_verified_message(message):
+    global ADMIN_VERIFIED_MSG
+    ADMIN_VERIFIED_MSG = message.text
+    bot.send_message(message.chat.id, f"✅ Admin Verified Message Updated!")
+
+@bot.message_handler(func=lambda m: m.text == "📣 Broadcast")
+def broadcast(message):
+    if not is_admin(message.from_user.id):
+        return
+    msg = bot.send_message(message.chat.id, "Broadcast message লিখুন:")
+    bot.register_next_step_handler(msg, send_broadcast)
+
+def send_broadcast(message):
+    count = 0
+    for uid in data["users"]:
+        try:
+            bot.send_message(uid, message.text)
+            count += 1
+        except:
+            pass
+    bot.send_message(message.chat.id, f"✅ Sent to {count} users")
+
+# ---------- Run Bot ----------
+bot.infinity_polling()
