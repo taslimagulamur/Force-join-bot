@@ -1,18 +1,18 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup
-import os
 import json
+import os
 
 # ================= CONFIG =================
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Render / VPS Environment variable
+BOT_TOKEN = "8589887674:AAGZLYVrvpsv8PiH3MMpmApFlUI3YzPtBF4"  # আপনার Bot Token
 ADMINS = [8231476408]  # আপনার Telegram ID
 DATA_FILE = "data.json"
 
 # Welcome Media
-WELCOME_PHOTO_URL = "https://i.ibb.co/your-image.jpg"  # Replace with your Photo/GIF/Video
+WELCOME_PHOTO_URL = "https://i.ibb.co/your-image.jpg"  # আপনার welcome photo / GIF / video
 WELCOME_SOUND_URL = "https://www.example.com/welcome.mp3"  # Optional welcome sound
 
-# Admin Message for verified users
+# Admin Message for Verified Users
 ADMIN_VERIFIED_MSG = "🎉✅ আপনি সব চ্যানেল join করেছেন। এখন বট ব্যবহার করতে পারবেন! ❤️"
 
 # Inline Buttons for welcome (Multiple links)
@@ -28,11 +28,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 # ---------- Data Load / Save ----------
 def load_data():
     if not os.path.exists(DATA_FILE):
-        return {
-            "channels": [],  # Force join channels (Private/Public)
-            "force": True,
-            "users": []
-        }
+        return {"channels": [], "force": True, "users": []}
     with open(DATA_FILE, "r") as f:
         return json.load(f)
 
@@ -59,7 +55,7 @@ def check_join(uid):
             return False
     return True
 
-# ---------- Welcome / Start ----------
+# ---------- Start / Welcome ----------
 @bot.message_handler(commands=["start"])
 def start(message):
     uid = message.from_user.id
@@ -70,24 +66,21 @@ def start(message):
         data["users"].append(uid)
         save_data(data)
 
-    # Inline buttons setup
-    markup = InlineKeyboardMarkup(row_width=1)  # 1 button per row
+    # Inline Buttons (2 row)
+    markup = InlineKeyboardMarkup(row_width=1)
     for btn in WELCOME_BUTTONS:
         markup.add(InlineKeyboardButton(btn["text"], url=btn["url"]))
-    
-    # Force Join Check
+
+    # Force Join check
     if check_join(uid):
-        # Send Admin verified message (Photo + Text + Buttons)
         bot.send_message(chat_id, ADMIN_VERIFIED_MSG, reply_markup=markup)
     else:
-        # Fancy Bangla Welcome Text
         welcome_text = (
             "💖✨ স্বাগতম প্রিয় বন্ধু! ✨💖\n\n"
             "🌟 আমি তোমাকে আমাদের প্রিমিয়াম বটের জগতে স্বাগত জানাচ্ছি! 🌟\n"
             "🥰 Force Join সব চ্যানেল করতে হবে, তারপর বট ব্যবহার করতে পারবেন! 😎🎉\n\n"
             "✅ নিচের বাটন ক্লিক করে চ্যানেল Join & Verify করুন 🚀"
         )
-        # Send Photo / GIF
         bot.send_photo(chat_id, WELCOME_PHOTO_URL, caption=welcome_text, reply_markup=markup)
         # Optional Welcome Sound
         # bot.send_audio(chat_id, WELCOME_SOUND_URL)
